@@ -121,6 +121,17 @@ class Session:
     doubts: list[Doubt] = field(default_factory=list)
     timer: CALLBACK_TYPE | None = None
     updated: float = field(default_factory=time.monotonic)
+    origin: str | None = None  # satellite / device / user that asked
+
+
+def _origin(user_input: Any) -> str | None:
+    """Who is talking: the satellite or device, else the HA user."""
+    for attr in ("satellite_id", "device_id"):
+        value = getattr(user_input, attr, None)
+        if value:
+            return f"{attr}:{value}"
+    user = getattr(getattr(user_input, "context", None), "user_id", None)
+    return f"user:{user}" if user else None
 
 
 class AssistHandler:
@@ -129,12 +140,12 @@ class AssistHandler:
         self._get_coordinator = get_coordinator
         self.sessions: dict[str, Session] = {}
         self._unsub: list[CALLBACK_TYPE] = []
+        self._answers_unsub: CALLBACK_TYPE | None = None
 
     # --- registration ----------------------------------------------------------------
 
     def register(self) -> None:
         self._unsub.append(_register_trigger(self.hass, ADD_SENTENCES, self._on_add))
-        self._unsub.append(_register_trigger(self.hass, ANSWER_SENTENCES, self._on_answer))
 
     def unregister(self) -> None:
         for unsub in self._unsub:
@@ -144,6 +155,18 @@ class AssistHandler:
             if s.timer:
                 s.timer()
         self.sessions.clear()
+        self._sync_answers()
+
+    def _sync_answers(self) -> None:
+        """Answer sentences ("sí", "cancela", "dos"...) exist only while a question is
+        pending, so they never take over other Assist commands."""
+        pending = any(s.doubts for s in self.sessions.values())
+        if pending and self._answers_unsub is None:
+            self._answers_unsub = _register_trigger(self.hass, ANSWER_SENTENCES,
+                                                    self._on_answer)
+        elif not pending and self._answers_unsub is not None:
+            self._answers_unsub()
+            self._answers_unsub = None
 
     # --- sessions --------------------------------------------------------------------
 
@@ -154,10 +177,14 @@ class AssistHandler:
         s = self.sessions.get(self._key(user_input))
         if s and s.doubts:
             return s
-        # Clients that do not keep the conversation id: use the most recent open
-        # session if it is fresh.
+        # A voice satellite starts a new conversation after the wake word: accept the
+        # answer only from the same satellite/device/user that was asked.
+        origin = _origin(user_input)
+        if origin is None:
+            return None
         fresh = [x for x in self.sessions.values()
-                 if x.doubts and time.monotonic() - x.updated < PENDING_TTL]
+                 if x.doubts and x.origin == origin
+                 and time.monotonic() - x.updated < PENDING_TTL]
         return max(fresh, key=lambda x: x.updated) if fresh else None
 
     def _arm_timer(self, key: str, session: Session) -> None:
@@ -168,6 +195,7 @@ class AssistHandler:
         @callback
         def _expire(_now: Any) -> None:
             s = self.sessions.pop(key, None)
+            self._sync_answers()
             if not s:
                 return
             for d in s.doubts:
@@ -238,8 +266,10 @@ class AssistHandler:
         if doubts:
             key = self._key(user_input)
             session = self.sessions.setdefault(key, Session())
+            session.origin = _origin(user_input)
             session.doubts.extend(doubts)
             self._arm_timer(key, session)
+            self._sync_answers()
             parts.append(self._question(session.doubts[0]))
         return " ".join(parts) or "No he añadido nada."
 
@@ -269,7 +299,7 @@ class AssistHandler:
 
         if words and words[0] in {"ninguno", "ninguna", "nada", "dejalo", "olvidalo",
                                   "cancela", "cancelar"}:
-            session.doubts.pop(0)
+            _drop(session, d)
             return self._next(key, session, f"Vale, no añado {d.query}.")
 
         if any(w in {"mas", "otras", "otros", "otra", "otro"} for w in words) \
@@ -314,7 +344,7 @@ class AssistHandler:
                                    "already_chosen", "dry_run", "queued"):
                 names.append(c.get("name", c["id"]))
         await coordinator.async_request_refresh()
-        session.doubts.pop(0)
+        _drop(session, d)
         done = f"Añadido {_join(names)}." if names else "No he podido añadirlo."
         return self._next(key, session, done)
 
@@ -345,7 +375,14 @@ class AssistHandler:
         if session.timer:
             session.timer()
         self.sessions.pop(key, None)
+        self._sync_answers()
         return prefix
+
+
+def _drop(session: Session, doubt: Doubt) -> None:
+    """Remove this doubt (not "the first"): another answer may have arrived meanwhile."""
+    if doubt in session.doubts:
+        session.doubts.remove(doubt)
 
 
 def _register_trigger(hass: HomeAssistant, sentences: list[str], cb: Any) -> CALLBACK_TYPE:

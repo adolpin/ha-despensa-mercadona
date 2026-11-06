@@ -55,8 +55,11 @@ choose_candidate:
 
 more_candidates:
   fields:
+    callback:
+      example: "/mercadona_a1b2c3_mas"
+      selector:
+        text:
     request_id:
-      required: true
       example: "a1b2c3"
       selector:
         text:

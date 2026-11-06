@@ -116,6 +116,10 @@
         "request_id": {
           "name": "Petición",
           "description": "request_id del evento mercadona_unresolved."
+        },
+        "callback": {
+          "name": "Botón de Telegram",
+          "description": "Dato del botón pulsado (/mercadona_<petición>_mas)."
         }
       }
     }

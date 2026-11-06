@@ -77,14 +77,22 @@ async def async_add_and_notify(hass: HomeAssistant, coordinator: DespensaCoordin
 
 
 CALLBACK_RE = re.compile(r"^/mercadona_(?P<rid>[0-9a-f]{6})_(?P<choice>[A-Za-z0-9.-]+)$")
-REQUEST_SCHEMA = vol.Schema({vol.Required("request_id"): vol.Match(r"^[0-9a-f]{6}$")})
+REQUEST_ID = vol.All(cv.string, vol.Match(r"^[0-9a-f]{6}$"))
+REQUEST_SCHEMA = vol.All(
+    vol.Schema({
+        vol.Optional("request_id"): REQUEST_ID,
+        # Telegram button data; a plain string that templates never turn into a number.
+        vol.Optional("callback"): vol.All(cv.string, vol.Match(CALLBACK_RE)),
+    }),
+    cv.has_at_least_one_key("request_id", "callback"),
+)
 CHOOSE_SCHEMA = vol.All(
     vol.Schema({
-        vol.Optional("request_id"): vol.Match(r"^[0-9a-f]{6}$"),
+        vol.Optional("request_id"): REQUEST_ID,
         vol.Optional("product_id"): cv.string,
         # Telegram button data "/mercadona_<request_id>_<product_id>": a plain string
         # that templates never turn into a number (ids such as "12049.10").
-        vol.Optional("callback"): vol.Match(CALLBACK_RE),
+        vol.Optional("callback"): vol.All(cv.string, vol.Match(CALLBACK_RE)),
     }),
     cv.has_at_least_one_key("callback", "product_id"),
 )
@@ -117,8 +125,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         return result
 
     async def more(call: ServiceCall) -> ServiceResponse:
+        rid = call.data.get("request_id")
+        if call.data.get("callback"):
+            m = CALLBACK_RE.match(call.data["callback"])
+            assert m is not None  # validated by the schema
+            rid = m["rid"]
         try:
-            return await _coordinator(hass).client.more(call.data["request_id"])
+            return await _coordinator(hass).client.more(rid)
         except DespensaError as exc:
             raise HomeAssistantError(f"Despensa: {exc}") from exc
 

@@ -116,6 +116,10 @@
         "request_id": {
           "name": "Request",
           "description": "request_id from mercadona_unresolved."
+        },
+        "callback": {
+          "name": "Telegram button",
+          "description": "Pressed button data."
         }
       }
     }

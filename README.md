@@ -1,3 +1,5 @@
+<p align="center"><img src="custom_components/mercadona/brand/icon@2x.png" width="128" alt="Despensa"></p>
+
 # Mercadona (Despensa) para Home Assistant
 
 Integración de Home Assistant para un uso doméstico concreto: manejar como lista de la

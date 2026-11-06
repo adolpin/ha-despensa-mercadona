@@ -37,3 +37,24 @@ add_product:
       example: "leche"
       selector:
         text:
+
+choose_candidate:
+  fields:
+    request_id:
+      required: true
+      example: "a1b2c3"
+      selector:
+        text:
+    product_id:
+      required: true
+      example: "10382"
+      selector:
+        text:
+
+more_candidates:
+  fields:
+    request_id:
+      required: true
+      example: "a1b2c3"
+      selector:
+        text:

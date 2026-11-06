@@ -56,5 +56,12 @@ class DespensaClient:
         return await self._request("DELETE", f"/v1/items/{product_id}",
                                    params={"source": source})
 
+    async def choose(self, request_id: str, product_id: str) -> dict[str, Any]:
+        return await self._request("POST", f"/v1/requests/{request_id}/choose",
+                                   json={"product_id": product_id})
+
+    async def more(self, request_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/v1/requests/{request_id}/more")
+
     async def search(self, query: str, n: int = 5) -> dict[str, Any]:
         return await self._request("GET", "/v1/search", params={"q": query, "n": n})

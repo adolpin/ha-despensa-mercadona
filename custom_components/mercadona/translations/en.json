@@ -90,6 +90,30 @@
           "description": "With product id: remember this text."
         }
       }
+    },
+    "choose_candidate": {
+      "name": "Choose candidate",
+      "description": "Add the chosen product of an ambiguous request.",
+      "fields": {
+        "request_id": {
+          "name": "Request",
+          "description": "request_id from mercadona_unresolved."
+        },
+        "product_id": {
+          "name": "Product id",
+          "description": "One of the candidates."
+        }
+      }
+    },
+    "more_candidates": {
+      "name": "More candidates",
+      "description": "Return the next candidates of an ambiguous request.",
+      "fields": {
+        "request_id": {
+          "name": "Request",
+          "description": "request_id from mercadona_unresolved."
+        }
+      }
     }
   }
 }

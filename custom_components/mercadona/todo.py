@@ -80,8 +80,9 @@ class MercadonaTodoList(CoordinatorEntity[DespensaCoordinator], TodoListEntity):
         )
         if result.get("result") == "unresolved":
             raise HomeAssistantError(
-                f"No sé qué «{text}» añadir: {result.get('reason')}. "
-                "Elige en la notificación."
+                f"Hay varias opciones para «{text}». Te pregunto cuál por mensaje."
+                if result.get("candidates") else
+                f"No encuentro «{text}» en Mercadona."
             )
 
     async def async_update_todo_item(self, item: TodoItem) -> None:

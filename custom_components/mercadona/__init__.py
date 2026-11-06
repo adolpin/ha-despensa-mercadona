@@ -19,7 +19,15 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
 from .api import DespensaClient, DespensaError
-from .const import CONF_TOKEN, CONF_URL, DOMAIN, EVENT_UNRESOLVED, SERVICE_ADD_PRODUCT
+from .const import (
+    CONF_TOKEN,
+    CONF_URL,
+    DOMAIN,
+    EVENT_UNRESOLVED,
+    SERVICE_ADD_PRODUCT,
+    SERVICE_CHOOSE,
+    SERVICE_MORE,
+)
 from .coordinator import DespensaCoordinator, MercadonaConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,6 +62,8 @@ async def async_add_and_notify(hass: HomeAssistant, coordinator: DespensaCoordin
             "query": result.get("query"),
             "reason": result.get("reason"),
             "candidates": result.get("candidates", []),
+            "request_id": result.get("request_id"),
+            "more": result.get("more", False),
             "qty": fields.get("qty", 1),
             "mode": fields.get("mode", "ensure"),
             "source": fields.get("source"),
@@ -64,12 +74,42 @@ async def async_add_and_notify(hass: HomeAssistant, coordinator: DespensaCoordin
     return result
 
 
+REQUEST_SCHEMA = vol.Schema({vol.Required("request_id"): vol.Match(r"^[0-9a-f]{6}$")})
+CHOOSE_SCHEMA = REQUEST_SCHEMA.extend({vol.Required("product_id"): cv.string})
+
+
+def _coordinator(hass: HomeAssistant) -> DespensaCoordinator:
+    entries = hass.config_entries.async_loaded_entries(DOMAIN)
+    if not entries:
+        raise ServiceValidationError("La integración Mercadona no está cargada")
+    coordinator: DespensaCoordinator = entries[0].runtime_data
+    return coordinator
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    async def choose(call: ServiceCall) -> ServiceResponse:
+        coordinator = _coordinator(hass)
+        try:
+            result = await coordinator.client.choose(call.data["request_id"],
+                                                     call.data["product_id"])
+        except DespensaError as exc:
+            raise HomeAssistantError(f"Despensa: {exc}") from exc
+        await coordinator.async_request_refresh()
+        return result
+
+    async def more(call: ServiceCall) -> ServiceResponse:
+        try:
+            return await _coordinator(hass).client.more(call.data["request_id"])
+        except DespensaError as exc:
+            raise HomeAssistantError(f"Despensa: {exc}") from exc
+
+    hass.services.async_register(DOMAIN, SERVICE_CHOOSE, choose, schema=CHOOSE_SCHEMA,
+                                 supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, SERVICE_MORE, more, schema=REQUEST_SCHEMA,
+                                 supports_response=SupportsResponse.ONLY)
+
     async def add_product(call: ServiceCall) -> ServiceResponse:
-        entries = hass.config_entries.async_loaded_entries(DOMAIN)
-        if not entries:
-            raise ServiceValidationError("La integración Mercadona no está cargada")
-        coordinator: DespensaCoordinator = entries[0].runtime_data
+        coordinator = _coordinator(hass)
         given = [k for k in ("ean", "product_id", "text") if call.data.get(k)]
         if len(given) != 1:
             raise ServiceValidationError("Indica exactamente uno: ean, product_id o text")

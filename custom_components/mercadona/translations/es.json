@@ -90,6 +90,30 @@
           "description": "Con id de producto: recordar que este texto es este producto."
         }
       }
+    },
+    "choose_candidate": {
+      "name": "Elegir candidato",
+      "description": "Añade al carrito el producto elegido de una petición ambigua.",
+      "fields": {
+        "request_id": {
+          "name": "Petición",
+          "description": "request_id del evento mercadona_unresolved."
+        },
+        "product_id": {
+          "name": "Id de producto",
+          "description": "Uno de los candidatos."
+        }
+      }
+    },
+    "more_candidates": {
+      "name": "Más candidatos",
+      "description": "Devuelve los siguientes candidatos de una petición ambigua.",
+      "fields": {
+        "request_id": {
+          "name": "Petición",
+          "description": "request_id del evento mercadona_unresolved."
+        }
+      }
     }
   }
 }

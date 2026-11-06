@@ -63,5 +63,9 @@ class DespensaClient:
     async def more(self, request_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/v1/requests/{request_id}/more")
 
+    async def segment(self, text: str) -> list[str]:
+        r = await self._request("GET", "/v1/segment", params={"q": text})
+        return list(r.get("items") or [text])
+
     async def search(self, query: str, n: int = 5) -> dict[str, Any]:
         return await self._request("GET", "/v1/search", params={"q": query, "n": n})

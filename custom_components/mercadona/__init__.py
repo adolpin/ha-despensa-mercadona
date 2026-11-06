@@ -29,6 +29,7 @@ from .const import (
     SERVICE_CHOOSE,
     SERVICE_MORE,
 )
+from .conversation import AssistHandler
 from .coordinator import DespensaCoordinator, MercadonaConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -147,6 +148,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: MercadonaConfigEntry) ->
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    assist = AssistHandler(hass, lambda: coordinator)
+    try:
+        assist.register()
+    except Exception:  # noqa: BLE001 - Assist sentences are optional
+        _LOGGER.exception("No se pudieron registrar las frases de Assist")
+    else:
+        entry.async_on_unload(assist.unregister)
     return True
 
 

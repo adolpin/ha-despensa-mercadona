@@ -91,6 +91,11 @@ def split_items(text: str) -> list[str]:
 
 
 def _label(c: dict[str, Any]) -> str:
+    """Spoken option: 'Lonchas extrafinas de Incarlopsa (120 g)'."""
+    if c.get("short"):
+        brand = f" de {c['brand']}" if c.get("brand") else ""
+        size = f" ({c['size_short']})" if c.get("size_short") else ""
+        return f"{c['short']}{brand}{size}"
     size = f" ({c['size']})" if c.get("size") else ""
     return f"{c.get('name', c.get('id'))}{size}"
 

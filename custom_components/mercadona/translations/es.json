@@ -51,8 +51,9 @@
   "selector": {
     "mode": {
       "options": {
-        "ensure": "Asegurar que está (no suma)",
-        "add": "Sumar unidades"
+        "ensure": "Que haya al menos esa cantidad",
+        "add": "Sumar unidades",
+        "set": "Cantidad exacta"
       }
     }
   },
@@ -79,7 +80,7 @@
         },
         "mode": {
           "name": "Modo",
-          "description": "ensure: asegurar que está. add: sumar unidades (solo a mano)."
+          "description": "ensure: que haya al menos esa cantidad. set: cantidad exacta. add: sumar (solo a mano)."
         },
         "source": {
           "name": "Origen",

@@ -28,6 +28,7 @@ add_product:
           options:
             - ensure
             - add
+            - set
     source:
       default: ha
       example: scanner

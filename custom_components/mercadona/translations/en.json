@@ -51,8 +51,9 @@
   "selector": {
     "mode": {
       "options": {
-        "ensure": "Ensure present (no extra units)",
-        "add": "Add units"
+        "ensure": "At least this quantity",
+        "add": "Add units",
+        "set": "Exact quantity"
       }
     }
   },
@@ -79,7 +80,7 @@
         },
         "mode": {
           "name": "Mode",
-          "description": "ensure or add."
+          "description": "ensure, set or add."
         },
         "source": {
           "name": "Source",

@@ -52,6 +52,10 @@ class DespensaClient:
         body = {k: v for k, v in fields.items() if v not in (None, "")}
         return await self._request("POST", "/v1/items", json=body)
 
+    async def remove_text(self, text: str, source: str) -> dict[str, Any]:
+        return await self._request("POST", "/v1/items/remove",
+                                   json={"text": text, "source": source})
+
     async def remove_item(self, product_id: str, source: str) -> dict[str, Any]:
         return await self._request("DELETE", f"/v1/items/{product_id}",
                                    params={"source": source})

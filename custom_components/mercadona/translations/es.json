@@ -1,0 +1,95 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Servicio Despensa",
+        "description": "Dirección del servicio Despensa (p. ej. http://192.0.2.10:8780) y token de su API local.",
+        "data": {
+          "url": "Dirección",
+          "token": "Token"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Nuevo token",
+        "description": "El token de la API local ya no es válido.",
+        "data": {
+          "token": "Token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se puede conectar con el servicio",
+      "invalid_auth": "Token no válido",
+      "invalid_url": "La dirección debe empezar por http:// o https://"
+    },
+    "abort": {
+      "already_configured": "Ya está configurado",
+      "reauth_successful": "Token actualizado"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "api_status": {
+        "name": "Estado de la API de Mercadona",
+        "state": {
+          "ok": "OK",
+          "error": "Error",
+          "unknown": "Desconocido"
+        }
+      },
+      "token_days_left": {
+        "name": "Días hasta caducar el token"
+      },
+      "cart_count": {
+        "name": "Productos en el carrito"
+      },
+      "pending_ops": {
+        "name": "Altas pendientes"
+      }
+    }
+  },
+  "selector": {
+    "mode": {
+      "options": {
+        "ensure": "Asegurar que está (no suma)",
+        "add": "Sumar unidades"
+      }
+    }
+  },
+  "services": {
+    "add_product": {
+      "name": "Añadir producto",
+      "description": "Añade un producto al carrito de Mercadona por texto, EAN o id.",
+      "fields": {
+        "text": {
+          "name": "Texto",
+          "description": "Nombre del producto, p. ej. «leche»."
+        },
+        "ean": {
+          "name": "EAN",
+          "description": "Código de barras."
+        },
+        "product_id": {
+          "name": "Id de producto",
+          "description": "Id de Mercadona."
+        },
+        "qty": {
+          "name": "Cantidad",
+          "description": "Unidades o kg."
+        },
+        "mode": {
+          "name": "Modo",
+          "description": "ensure: asegurar que está. add: sumar unidades (solo a mano)."
+        },
+        "source": {
+          "name": "Origen",
+          "description": "Quién lo pide: voice, scanner, nfc, button, appliance…"
+        },
+        "learn_text": {
+          "name": "Recordar texto",
+          "description": "Con id de producto: recordar que este texto es este producto."
+        }
+      }
+    }
+  }
+}

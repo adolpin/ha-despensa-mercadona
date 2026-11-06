@@ -40,13 +40,15 @@ add_product:
 
 choose_candidate:
   fields:
+    callback:
+      example: "/mercadona_a1b2c3_10382"
+      selector:
+        text:
     request_id:
-      required: true
       example: "a1b2c3"
       selector:
         text:
     product_id:
-      required: true
       example: "10382"
       selector:
         text:

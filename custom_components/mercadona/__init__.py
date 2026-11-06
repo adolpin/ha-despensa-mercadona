@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -74,8 +75,18 @@ async def async_add_and_notify(hass: HomeAssistant, coordinator: DespensaCoordin
     return result
 
 
+CALLBACK_RE = re.compile(r"^/mercadona_(?P<rid>[0-9a-f]{6})_(?P<choice>[A-Za-z0-9.-]+)$")
 REQUEST_SCHEMA = vol.Schema({vol.Required("request_id"): vol.Match(r"^[0-9a-f]{6}$")})
-CHOOSE_SCHEMA = REQUEST_SCHEMA.extend({vol.Required("product_id"): cv.string})
+CHOOSE_SCHEMA = vol.All(
+    vol.Schema({
+        vol.Optional("request_id"): vol.Match(r"^[0-9a-f]{6}$"),
+        vol.Optional("product_id"): cv.string,
+        # Telegram button data "/mercadona_<request_id>_<product_id>": a plain string
+        # that templates never turn into a number (ids such as "12049.10").
+        vol.Optional("callback"): vol.Match(CALLBACK_RE),
+    }),
+    cv.has_at_least_one_key("callback", "product_id"),
+)
 
 
 def _coordinator(hass: HomeAssistant) -> DespensaCoordinator:
@@ -89,9 +100,16 @@ def _coordinator(hass: HomeAssistant) -> DespensaCoordinator:
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def choose(call: ServiceCall) -> ServiceResponse:
         coordinator = _coordinator(hass)
+        if call.data.get("callback"):
+            m = CALLBACK_RE.match(call.data["callback"])
+            assert m is not None  # validated by the schema
+            rid, pid = m["rid"], m["choice"]
+        else:
+            rid, pid = call.data.get("request_id", ""), call.data["product_id"]
+        if not rid:
+            raise ServiceValidationError("Falta request_id")
         try:
-            result = await coordinator.client.choose(call.data["request_id"],
-                                                     call.data["product_id"])
+            result = await coordinator.client.choose(rid, pid)
         except DespensaError as exc:
             raise HomeAssistantError(f"Despensa: {exc}") from exc
         await coordinator.async_request_refresh()

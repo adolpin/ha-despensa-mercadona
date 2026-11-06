@@ -102,6 +102,10 @@
         "product_id": {
           "name": "Id de producto",
           "description": "Uno de los candidatos."
+        },
+        "callback": {
+          "name": "Botón de Telegram",
+          "description": "Dato del botón pulsado (/mercadona_<petición>_<producto>); sustituye a los otros dos campos."
         }
       }
     },

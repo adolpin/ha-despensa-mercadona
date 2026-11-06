@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import re
 import time
@@ -358,11 +357,20 @@ def _register_trigger(hass: HomeAssistant, sentences: list[str], cb: Any) -> CAL
     from homeassistant.components.conversation.agent_manager import get_agent_manager
 
     manager = get_agent_manager(hass)
-    params = list(inspect.signature(manager.register_trigger).parameters)
-    if len(params) >= 2:
-        unsub: CALLBACK_TYPE = manager.register_trigger(sentences, cb)
-        return unsub
+    fn = manager.register_trigger
+    # Count positional parameters without inspect.signature: on Python 3.14 that
+    # evaluates annotations (PEP 649) and fails on names that only exist under
+    # TYPE_CHECKING in Home Assistant (seen on HA 2026.10.4).
+    code = getattr(getattr(fn, "__func__", fn), "__code__", None)
+    n_params = code.co_argcount - 1 if code is not None else 2  # minus self
+    if n_params >= 2:
+        try:
+            unsub: CALLBACK_TYPE = fn(sentences, cb)
+            return unsub
+        except TypeError:
+            _LOGGER.debug("register_trigger(sentences, callback) no aceptado; pruebo la "
+                          "forma antigua")
     from homeassistant.components.conversation.trigger import TriggerDetails
 
-    unsub = manager.register_trigger(TriggerDetails(sentences, cb))
+    unsub = fn(TriggerDetails(sentences, cb))
     return unsub

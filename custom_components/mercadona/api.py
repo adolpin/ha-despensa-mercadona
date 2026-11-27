@@ -21,6 +21,10 @@ class DespensaConnectionError(DespensaError):
     """Service unreachable or failing."""
 
 
+class DespensaNotSupported(DespensaError):
+    """The service is older than this integration (route missing)."""
+
+
 class DespensaClient:
     def __init__(self, session: aiohttp.ClientSession, url: str, token: str) -> None:
         self._session = session
@@ -35,6 +39,8 @@ class DespensaClient:
             ) as resp:
                 if resp.status == 401:
                     raise DespensaAuthError("Token no válido")
+                if resp.status in (404, 405) and method == "POST" and path == "/v1/segment":
+                    raise DespensaNotSupported(path)
                 if resp.status >= 400:
                     text = await resp.text()
                     raise DespensaConnectionError(f"HTTP {resp.status}: {text[:200]}")
@@ -67,9 +73,10 @@ class DespensaClient:
     async def more(self, request_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/v1/requests/{request_id}/more")
 
+    async def segment_parts(self, parts: list[str]) -> list[tuple[str, int]]:
+        r = await self._request("POST", "/v1/segment", json={"parts": parts})
+        return [(str(x["text"]), int(x["part"])) for x in r.get("items") or []]
+
     async def segment(self, text: str) -> list[str]:
         r = await self._request("GET", "/v1/segment", params={"q": text})
         return list(r.get("items") or [text])
-
-    async def search(self, query: str, n: int = 5) -> dict[str, Any]:
-        return await self._request("GET", "/v1/search", params={"q": query, "n": n})

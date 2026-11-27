@@ -31,7 +31,7 @@ from typing import Any
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
 
-from .api import DespensaError
+from .api import DespensaError, DespensaNotSupported
 from .const import EVENT_UNRESOLVED
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,15 +40,33 @@ SOURCE = "voice"
 OPTIONS_SPOKEN = 3
 PENDING_TTL = 300  # seconds before an unanswered doubt goes to Telegram
 
-_LIST = "[la] [lista [de la compra] [de]] mercadona"
-_ADD_VERB = "(añade|añadir|agrega|agregar|apunta|apuntar|pon|poner|mete|meter)"
-_DEL_VERB = "(quita|quitar|borra|borrar|elimina|eliminar|saca|sacar|tacha|tachar)"
+# Verbs as said, with and without accents (speech recognition writes either). Multi-word
+# ones first: the regex that strips them from the sentence tries them in this order.
+ADD_VERBS = (
+    "hay que comprar", "hace falta", "hacen falta", "añádeme", "añademe", "añade",
+    "añadir", "agrégame", "agregame", "agrega", "agregar", "apúntame", "apuntame",
+    "apunta", "apuntar", "anótame", "anotame", "anota", "anotar", "ponme", "pon", "poner",
+    "méteme", "meteme", "mete", "meter", "incluye", "incluir", "compra", "comprar",
+    "necesito", "necesitamos", "falta", "faltan", "quiero", "queremos",
+)
+DEL_VERBS = (
+    "ya no hace falta", "quítame", "quitame", "quita", "quitar", "bórrame", "borrame",
+    "borra", "borrar", "elimina", "eliminar", "saca", "sacar", "tacha", "tachar",
+)
+_LIST = "[el|la] [(lista|carrito|cesta) [de la compra] [de|del]] mercadona"
+_POLITE = "[por favor|oye]"
+_ADD_VERB = f"({'|'.join(ADD_VERBS)})"
+_DEL_VERB = f"({'|'.join(DEL_VERBS)})"
+# "Mercadona" anywhere: at the end, after the verb or before it.
 ADD_SENTENCES = [
-    f"{_ADD_VERB} {{items}} (a|en) {_LIST}",
-    f"{_ADD_VERB} (a|en) {_LIST} {{items}}",
+    f"{_POLITE} {_ADD_VERB} {{items}} (a|en|para|de|del) {_LIST} [por favor]",
+    f"{_POLITE} {_ADD_VERB} (a|en|para) {_LIST} {{items}}",
+    f"{_POLITE} [a|en|para] {_LIST} {_ADD_VERB} {{items}}",
 ]
 REMOVE_SENTENCES = [
-    f"{_DEL_VERB} {{items}} (de|del) {_LIST}",
+    f"{_POLITE} {_DEL_VERB} {{items}} (de|del|en) {_LIST} [por favor]",
+    f"{_POLITE} {_DEL_VERB} (de|del|en) {_LIST} {{items}}",
+    f"{_POLITE} [de|del|en] {_LIST} {_DEL_VERB} {{items}}",
 ]
 SET_SENTENCES = [
     f"(cambia|cambiar) {{items}} a {{qty}} [unidades] (en|de) {_LIST}",
@@ -90,14 +108,14 @@ def _norm(text: str) -> str:
 
 # --- parsing ---------------------------------------------------------------------------
 
-_PREFIX = re.compile(
-    r"^\s*(añade|añadir|agrega|agregar|apunta|apuntar|pon|poner|mete|meter|quita|quitar|"
-    r"borra|borrar|elimina|eliminar|saca|sacar|tacha|tachar|cambia|cambiar)\s+", re.I)
-_SUFFIX = re.compile(
-    r"\s+(a|en|de|del)\s+(la\s+)?(lista\s+(de\s+la\s+compra\s+)?(de\s+)?)?mercadona[\s.!]*$",
-    re.I)
-_INFIX = re.compile(
-    r"^(a|en)\s+(la\s+)?(lista\s+(de\s+la\s+compra\s+)?(de\s+)?)?mercadona[\s,:]+", re.I)
+_LIST_RE = (r"(?:(?:el|la)\s+)?(?:(?:lista|carrito|cesta)\s+(?:de\s+la\s+compra\s+)?"
+            r"(?:(?:de|del)\s+)?)?mercadona")
+_VERB_RE = "|".join(re.escape(v) for v in (*ADD_VERBS, *DEL_VERBS, "cambia", "cambiar"))
+_POLITE_RE = re.compile(r"^(?:por\s+favor|oye)[\s,]+|[\s,]+por\s+favor$", re.I)
+_LEAD_LIST = re.compile(rf"^(?:(?:a|en|para|de|del)\s+)?{_LIST_RE}[\s,:]+", re.I)
+_PREFIX = re.compile(rf"^(?:{_VERB_RE})\b[\s,:]*", re.I)
+_INFIX = re.compile(rf"^(?:a|en|para|de|del)\s+{_LIST_RE}[\s,:]+", re.I)
+_SUFFIX = re.compile(rf"[\s,]+(?:a|en|para|de|del)\s+{_LIST_RE}$", re.I)
 _QTY = re.compile(
     r"^(?P<n>\d+(?:[.,]\d+)?|media docena|una docena|docena|un|uno|una|dos|tres|cuatro|"
     r"cinco|seis|siete|ocho|nueve|diez|once|doce)\s+(?P<more>m[aá]s\s+)?(?:(?:de|del)\s+)?"
@@ -106,12 +124,16 @@ _QTY = re.compile(
 
 def items_text(raw: str, fallback: str) -> str:
     """Product part of the ORIGINAL sentence (HA strips commas before matching, the
-    original text keeps them)."""
-    text = _PREFIX.sub("", raw.strip(), count=1)
-    stripped = _SUFFIX.sub("", text, count=1)
+    original text keeps them): without "por favor", the verb and "(en la lista de)
+    Mercadona", wherever it was said."""
+    text = raw.strip().strip(".!?¡¿ ")
+    text = _POLITE_RE.sub("", _POLITE_RE.sub("", text, count=1), count=1).strip()
+    text = _LEAD_LIST.sub("", text, count=1)
+    text = _PREFIX.sub("", text, count=1)
+    stripped = _INFIX.sub("", text, count=1)
     if stripped == text:
-        stripped = _INFIX.sub("", text, count=1)
-    return stripped.strip() or fallback
+        stripped = _SUFFIX.sub("", text, count=1)
+    return stripped.strip(" ,.:") or fallback
 
 
 def split_items(text: str) -> list[str]:
@@ -197,6 +219,12 @@ def _cap(text: str) -> str:
     return text[:1].upper() + text[1:]
 
 
+def _failed_text(failed: list[str], verb: str, everything: bool) -> str:
+    if everything:
+        return "El servicio de la lista de la compra no responde ahora mismo."
+    return f"No he podido {verb} {_and(failed)}: el servicio no responde ahora mismo."
+
+
 @dataclass
 class Doubt:
     request_id: str
@@ -234,8 +262,7 @@ def _origin(user_input: Any) -> str | None:
 
 
 _WORD = re.compile(r"[^\W\d_]+")
-_VERBS = {_norm(v) for v in (_ADD_VERB + _DEL_VERB).strip("()").replace(")(", "|").split("|")}
-_VERBS |= {"cambia", "cambiar"}
+_VERBS = {_norm(v).split()[0] for v in (*ADD_VERBS, *DEL_VERBS, "cambia", "cambiar")}
 
 
 def _label(c: dict[str, Any]) -> str:
@@ -288,10 +315,14 @@ class AssistHandler:
         self._unsub: list[CALLBACK_TYPE] = []
         self._answers_unsub: CALLBACK_TYPE | None = None
         self._answers_sentences: list[str] = []
+        self.closed: set[str] = set()  # request ids the cart answered
 
     # registration
 
     def register(self) -> None:
+        coordinator = self._coord()
+        if coordinator is not None:
+            self._unsub.append(coordinator.async_add_listener(self._on_cart_update))
         self._unsub.append(_register_trigger(self.hass, ADD_SENTENCES, self._on_add))
         self._unsub.append(_register_trigger(self.hass, REMOVE_SENTENCES, self._on_remove))
         self._unsub.append(_register_trigger(self.hass, SET_SENTENCES, self._on_set))
@@ -346,17 +377,48 @@ class AssistHandler:
         def _expire(_now: Any) -> None:
             s = self.sessions.pop(key, None)
             self._sync_answers()
-            if not s:
-                return
-            for d in s.doubts:
-                self.hass.bus.async_fire(EVENT_UNRESOLVED, {
-                    "query": d.query, "reason": "sin respuesta en Assist",
-                    "candidates": d.candidates[:5], "request_id": d.request_id,
-                    "more": d.more or len(d.candidates) > 5, "source": SOURCE,
-                    "is_text": True, "qty": d.qty, "mode": "ensure", "action": d.action,
-                })
+            if s and s.doubts:
+                self.hass.async_create_task(self._to_telegram(s.doubts))
 
         session.timer = async_call_later(self.hass, PENDING_TTL, _expire)
+
+    async def _to_telegram(self, doubts: list[Doubt]) -> None:
+        """Unanswered doubts go to Telegram, except those the cart already answered
+        (the product was added by hand in the app meanwhile): read the cart first."""
+        coordinator = self._coord()
+        if coordinator is not None:
+            try:
+                await coordinator.async_refresh()
+            except Exception:  # noqa: BLE001 - Telegram is still better than nothing
+                _LOGGER.debug("No se pudo releer el carrito antes de Telegram")
+        for d in doubts:
+            if d.request_id in self.closed:
+                _LOGGER.debug("Duda %s resuelta en el carrito: no va a Telegram",
+                              d.request_id)
+                continue
+            self.hass.bus.async_fire(EVENT_UNRESOLVED, {
+                "query": d.query, "reason": "sin respuesta en Assist",
+                "candidates": d.candidates[:5], "request_id": d.request_id,
+                "more": d.more or len(d.candidates) > 5, "source": SOURCE,
+                "is_text": True, "qty": d.qty, "mode": "ensure", "action": d.action,
+            })
+
+    @callback
+    def _on_cart_update(self) -> None:
+        """The service closes the questions the cart answered: forget them here too."""
+        coordinator = self._coord()
+        cart = (coordinator.data or {}).get("cart") if coordinator is not None else None
+        closed = set((cart or {}).get("closed_requests") or [])
+        if not closed:
+            return
+        self.closed |= closed
+        for key, session in list(self.sessions.items()):
+            session.doubts = [d for d in session.doubts if d.request_id not in closed]
+            if not session.doubts:
+                if session.timer:
+                    session.timer()
+                self.sessions.pop(key, None)
+        self._sync_answers()
 
     def _open(self, user_input: Any, doubts: list[Doubt]) -> str:
         key = self._key(user_input)
@@ -373,20 +435,40 @@ class AssistHandler:
     async def _items(self, user_input: Any, result: Any) -> list[Item]:
         entity = result.entities.get("items") if hasattr(result, "entities") else None
         wildcard = str(entity.text if entity is not None else "")
+        parts = [p for p in (parse_item(c) for c in split_items(
+            items_text(user_input.text, wildcard))) if p.text]
+        if not parts:
+            return []
+        client = self._coord().client
+        try:
+            # The service joins what belongs together ("caldo de pollo, gallina blanca":
+            # a comma at a pause, then a brand) and splits runs without separators.
+            pieces = await client.segment_parts([p.text for p in parts])
+        except DespensaNotSupported:
+            pieces = await self._segment_each(parts)
+        except DespensaError:
+            pieces = [(p.text, i) for i, p in enumerate(parts)]
         out: list[Item] = []
-        for chunk in split_items(items_text(user_input.text, wildcard)):
-            item = parse_item(chunk)
-            if len(item.text.split()) > 1:
+        seen: set[int] = set()
+        for text, idx in pieces:
+            part = parts[idx] if 0 <= idx < len(parts) else Item(text)
+            # The quantity said belongs to the first product of its part.
+            out.append(Item(text, part.qty, part.more, part.explicit) if idx not in seen
+                       else Item(text))
+            seen.add(idx)
+        return out
+
+    async def _segment_each(self, parts: list[Item]) -> list[tuple[str, int]]:
+        """Older service without POST /v1/segment: split each part on its own."""
+        out: list[tuple[str, int]] = []
+        for i, p in enumerate(parts):
+            pieces = [p.text]
+            if len(p.text.split()) > 1:
                 try:
-                    pieces = await self._coord().client.segment(item.text)
+                    pieces = await self._coord().client.segment(p.text)
                 except DespensaError:
-                    pieces = [item.text]
-                for i, piece in enumerate(pieces):
-                    # The quantity said belongs to the first product of the run.
-                    out.append(Item(piece, item.qty, item.more, item.explicit) if i == 0
-                               else Item(piece))
-            elif item.text:
-                out.append(item)
+                    pass
+            out.extend((piece, i) for piece in pieces)
         return out
 
     # add / set
@@ -418,6 +500,7 @@ class AssistHandler:
         present: list[str] = []
         missing: list[str] = []
         queued: list[str] = []
+        failed: list[str] = []
         doubts: list[Doubt] = []
         for item in items:
             if item.more:
@@ -430,8 +513,11 @@ class AssistHandler:
                 r = await coordinator.client.add_item(text=item.text, qty=item.qty,
                                                       mode=mode, source=SOURCE)
             except DespensaError as exc:
-                _LOGGER.warning("Despensa no responde: %s", exc)
-                return "El servicio de la lista de la compra no responde ahora mismo."
+                # Keep going: what was already added stays, the doubts already created
+                # in the service are still asked, and this one is said as failed.
+                _LOGGER.warning("Despensa no responde con %r: %s", item.text, exc)
+                failed.append(item.text)
+                continue
             res = r.get("result")
             name = (r.get("product") or {}).get("name") or item.text
             label = f"{_qty_text(item.qty)} de {name}" if item.qty != 1 else name
@@ -461,6 +547,8 @@ class AssistHandler:
             parts.append(f"{_cap(_and(queued))} se añadirá en cuanto Mercadona responda.")
         if missing:
             parts.append(f"No encuentro {_and(missing)} en Mercadona.")
+        if failed:
+            parts.append(_failed_text(failed, "añadir", len(failed) == len(items)))
         if doubts:
             parts.append(self._open(user_input, doubts))
         return " ".join(parts) or "No he añadido nada."
@@ -477,13 +565,15 @@ class AssistHandler:
             return "No he entendido qué quitar."
         removed: list[str] = []
         absent: list[str] = []
+        failed: list[str] = []
         doubts: list[Doubt] = []
         for item in items:
             try:
                 r = await coordinator.client.remove_text(item.text, SOURCE)
             except DespensaError as exc:
-                _LOGGER.warning("Despensa no responde: %s", exc)
-                return "El servicio de la lista de la compra no responde ahora mismo."
+                _LOGGER.warning("Despensa no responde con %r: %s", item.text, exc)
+                failed.append(item.text)
+                continue
             res = r.get("result")
             if res in ("removed", "dry_run"):
                 removed.append((r.get("product") or {}).get("name") or item.text)
@@ -499,6 +589,8 @@ class AssistHandler:
         if absent:
             parts.append(f"{_cap(_and(absent))} no "
                          f"{'estaba' if len(absent) == 1 else 'estaban'} en la lista.")
+        if failed:
+            parts.append(_failed_text(failed, "quitar", len(failed) == len(items)))
         if doubts:
             parts.append(self._open(user_input, doubts))
         return " ".join(parts) or "No he quitado nada."
@@ -507,7 +599,7 @@ class AssistHandler:
 
     async def _on_answer(self, user_input: Any, result: Any) -> str | None:
         words = _norm(user_input.text).split()
-        if words and words[0] in _VERBS and "mercadona" in words:
+        if "mercadona" in words and any(w in _VERBS for w in words[:4]):
             # "añade leche de Hacendado a Mercadona" also contains an option word: Home
             # Assistant runs every matching trigger, and the add/remove one answers.
             return None

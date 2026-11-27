@@ -8,10 +8,14 @@
 - Clear products go straight to the cart. For doubtful ones the answer is a short
   question: "Jamón serrano: ¿gran reserva de Hacendado o lonchas extrafinas de
   Incarlopsa?". Answers: "el segundo", "el de Hacendado", "el gran reserva", "los dos",
-  "otras", "sí" (one option), "ninguno".
+  "otras", "sí" (one option), "ninguno", or the option itself as offered, with or
+  without article or brand ("lonchas extrafinas", "gran reserva de Hacendado").
 - Answer sentences exist only while a question is pending, so they never take over
-  other Assist commands. An answer from another conversation counts only if it comes
-  from the same satellite, device or user.
+  other Assist commands: besides the fixed ones, any sentence that contains a word of
+  the options being offered (built from them, re-registered when they change). A
+  sentence with none of those words is not an answer and keeps reaching Home Assistant.
+  An answer from another conversation counts only if it comes from the same satellite,
+  device or user.
 - A doubt not answered in PENDING_TTL goes to Telegram (event mercadona_unresolved).
 """
 
@@ -156,7 +160,9 @@ def _option(c: dict[str, Any], with_size: bool = False) -> str:
     """Spoken option: 'gran reserva de Hacendado' (+ size only when needed)."""
     if c.get("short"):
         text = c["short"][:1].lower() + c["short"][1:]
-        if c.get("brand"):
+        # The short name falls back to the full name, which may already carry the
+        # brand ("Caldo de pollo Hacendado"): never "... Hacendado de Hacendado".
+        if c.get("brand") and _norm(c["brand"]) not in _norm(text):
             text += f" de {c['brand']}"
     else:
         text = c.get("name") or str(c.get("id"))
@@ -227,6 +233,37 @@ def _origin(user_input: Any) -> str | None:
     return f"user:{user}" if user else None
 
 
+_WORD = re.compile(r"[^\W\d_]+")
+_VERBS = {_norm(v) for v in (_ADD_VERB + _DEL_VERB).strip("()").replace(")(", "|").split("|")}
+_VERBS |= {"cambia", "cambiar"}
+
+
+def _label(c: dict[str, Any]) -> str:
+    return f"{c.get('short', '')} {c.get('brand') or ''} {c.get('name', '')}"
+
+
+def option_words(cands: list[dict[str, Any]]) -> list[str]:
+    """Words of the options offered, as said and without accents ('ángel', 'angel')."""
+    words: set[str] = set()
+    for c in cands:
+        for w in _WORD.findall(_label(c).lower()):
+            if len(w) < 3 or _norm(w) in _STOP:
+                continue
+            words.add(w)
+            words.add(_norm(w))
+    return sorted(words)
+
+
+def answer_sentences(doubts: list[Doubt]) -> list[str]:
+    """Fixed answer sentences plus "<anything> <word of an option> <anything>"."""
+    words: set[str] = set()
+    for d in doubts:
+        words.update(option_words(d.offered()))
+    if not words:
+        return list(ANSWER_SENTENCES)
+    return [*ANSWER_SENTENCES, f"[{{pre}}] ({'|'.join(sorted(words))}) [{{post}}]"]
+
+
 def question(d: Doubt) -> str:
     opts = _options(d.offered())
     if d.has_more() and len(opts) > 1:
@@ -250,6 +287,7 @@ class AssistHandler:
         self.sessions: dict[str, Session] = {}
         self._unsub: list[CALLBACK_TYPE] = []
         self._answers_unsub: CALLBACK_TYPE | None = None
+        self._answers_sentences: list[str] = []
 
     # registration
 
@@ -269,13 +307,18 @@ class AssistHandler:
         self._sync_answers()
 
     def _sync_answers(self) -> None:
-        pending = any(s.doubts for s in self.sessions.values())
-        if pending and self._answers_unsub is None:
-            self._answers_unsub = _register_trigger(self.hass, ANSWER_SENTENCES,
-                                                    self._on_answer)
-        elif not pending and self._answers_unsub is not None:
+        """Answer sentences for the questions being asked now (first doubt of each
+        session); registered only while there is one, rebuilt when the options change."""
+        current = [s.doubts[0] for s in self.sessions.values() if s.doubts]
+        wanted = answer_sentences(current) if current else []
+        if wanted == self._answers_sentences and (self._answers_unsub is not None) == bool(wanted):
+            return
+        if self._answers_unsub is not None:
             self._answers_unsub()
             self._answers_unsub = None
+        self._answers_sentences = wanted
+        if wanted:
+            self._answers_unsub = _register_trigger(self.hass, wanted, self._on_answer)
 
     # sessions
 
@@ -462,13 +505,17 @@ class AssistHandler:
 
     # answers
 
-    async def _on_answer(self, user_input: Any, result: Any) -> str:
+    async def _on_answer(self, user_input: Any, result: Any) -> str | None:
+        words = _norm(user_input.text).split()
+        if words and words[0] in _VERBS and "mercadona" in words:
+            # "añade leche de Hacendado a Mercadona" also contains an option word: Home
+            # Assistant runs every matching trigger, and the add/remove one answers.
+            return None
         session = self._session_for(user_input)
         if session is None:
             return "No tenía ninguna pregunta pendiente sobre la compra."
         key = next(k for k, v in self.sessions.items() if v is session)
         d = session.doubts[0]
-        words = _norm(user_input.text).split()
         coordinator = self._coord()
         if coordinator is None:
             return "La integración de Mercadona no está disponible."
@@ -556,6 +603,7 @@ class AssistHandler:
         else:
             return "No hay más opciones. " + question(d)
         self._arm_timer(key, session)
+        self._sync_answers()
         return question(d)
 
     def _next(self, key: str, session: Session, prefix: str) -> str:

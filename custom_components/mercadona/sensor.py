@@ -1,4 +1,5 @@
-"""Sensors: Mercadona API status, days until the token expires, products in the cart."""
+"""Sensors: Mercadona API status, days until the token expires, products in the cart
+and queued operations."""
 
 from __future__ import annotations
 

@@ -15,11 +15,16 @@ HTTP a la API local del servicio Despensa, con un token propio de esa API.
 
 - `todo.mercadona`: el carrito como lista de tareas. Añadir un elemento lo busca y lo
   añade al carrito sin duplicarlo; marcarlo como hecho lo quita.
-- Acción `mercadona.add_product` (texto, EAN o id de producto; modos `ensure` y `add`).
-- Evento `mercadona_unresolved` con candidatos cuando un texto es ambiguo.
+- Acción `mercadona.add_product` (texto, EAN o id de producto; modos `ensure` = que haya
+  al menos esa cantidad, `add` = sumar y `set` = cantidad exacta).
+- Evento `mercadona_unresolved` con candidatos cuando un texto es ambiguo, y acciones
+  `mercadona.choose_candidate` y `mercadona.more_candidates` para responderlo (por
+  ejemplo, desde botones de un bot de mensajería).
 - Sensores de diagnóstico: estado del servicio, caducidad de la sesión, altas pendientes
   y productos en el carrito.
-- Voz con Assist: "añade leche a Mercadona".
+- Voz con Assist, con frases propias en español: "añade huevos, 2 de jamón y pan a
+  Mercadona", "añade 2 más de jamón a Mercadona", "pon 3 leches en Mercadona", "quita el
+  jamón de Mercadona". Si hay duda, pregunta en la misma conversación.
 
 ## Instalación
 
@@ -34,7 +39,11 @@ su token.
 | GET | `/v1/health` | estado y caducidad de la sesión |
 | GET | `/v1/cart` | líneas del carrito |
 | POST | `/v1/items` | alta (`text`/`ean`/`product_id`, `qty`, `mode`, `source`, `learn_text`) |
+| POST | `/v1/items/remove` | baja por texto, buscando en el carrito |
 | DELETE | `/v1/items/{product_id}` | baja |
+| POST | `/v1/requests/{id}/choose` | elegir un candidato de una duda |
+| GET | `/v1/requests/{id}/more` | más candidatos de una duda |
+| GET | `/v1/segment` | trocear una frase en productos |
 
 Todas con `Authorization: Bearer <token>`.
 

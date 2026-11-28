@@ -285,7 +285,9 @@ def answer_sentences(doubts: list[Doubt]) -> list[str]:
     """Fixed answer sentences plus "<anything> <word of an option> <anything>"."""
     words: set[str] = set()
     for d in doubts:
-        words.update(option_words(d.offered()))
+        # Every candidate held, not only the three said: the one meant may be 4th or
+        # 5th ("fideo mediano" while asking about cabello, grueso and orientales).
+        words.update(option_words(d.candidates))
     if not words:
         return list(ANSWER_SENTENCES)
     return [*ANSWER_SENTENCES, f"[{{pre}}] ({'|'.join(sorted(words))}) [{{post}}]"]
@@ -615,6 +617,10 @@ class AssistHandler:
         if words and words[0] in {"ninguno", "ninguna", "nada", "dejalo", "olvidalo",
                                   "cancela", "cancelar"}:
             _drop(session, d)
+            try:
+                await coordinator.client.cancel(d.request_id)
+            except DespensaError as exc:  # older service, or down: it expires alone
+                _LOGGER.debug("No se ha cerrado la petición %s: %s", d.request_id, exc)
             verb = "quito" if d.action == "remove" else "añado"
             return self._next(key, session, f"Vale, no {verb} {d.query}.")
 
@@ -640,18 +646,24 @@ class AssistHandler:
         else:
             said = [w for w in words if w not in _STOP]
             scored = []
-            for c in offered:
-                label = set(_norm(f"{c.get('short', '')} {c.get('brand') or ''} "
-                                  f"{c.get('name', '')}").split())
+            # Every candidate held, said or not: the one meant may be 4th ("fideo
+            # mediano" while asking about orientales, cabello and grueso). The most words
+            # matched wins; on a tie, an option said over one not said ("cabello de
+            # ángel" over "cabello de ángel integral", 5th); any other tie asks again.
+            for i, c in enumerate(d.candidates):
+                label = _norm(f"{c.get('short', '')} {c.get('brand') or ''} "
+                              f"{c.get('name', '')}").split()
                 hits = sum(1 for w in said if any(x.startswith(w) for x in label))
-                scored.append((hits, c))
-            best = max((h for h, _ in scored), default=0)
-            winners = [c for h, c in scored if h == best and best > 0]
+                said_option = d.offset <= i < d.offset + OPTIONS_SPOKEN
+                scored.append(((hits, said_option), c))
+            best = max((k for k, _ in scored), default=(0, False))
+            winners = [c for k, c in scored if k == best and best[0] > 0]
             if len(winners) != 1:
                 return "No he entendido cuál. " + question(d)
             chosen = winners
 
         names: list[str] = []
+        present: list[str] = []
         for i, c in enumerate(chosen):
             try:
                 if i == 0:
@@ -664,17 +676,22 @@ class AssistHandler:
             except DespensaError as exc:
                 _LOGGER.warning("Despensa no responde: %s", exc)
                 return "El servicio de la lista de la compra no responde ahora mismo."
-            if r.get("result") not in ("error", "not_present"):
+            if r.get("result") == "already_present":
+                present.append(c.get("name", c["id"]))
+            elif r.get("result") not in ("error", "not_present"):
                 names.append(c.get("name", c["id"]))
         await coordinator.async_request_refresh()
         _drop(session, d)
-        if not names:
-            done = "No he podido hacerlo."
-        elif d.action == "remove":
-            done = f"Quitado {_and(names)}."
-        else:
+        done_parts: list[str] = []
+        if names and d.action == "remove":
+            done_parts.append(f"Quitado {_and(names)}.")
+        elif names:
             qty = f"{_qty_text(d.qty)} de " if d.qty != 1 else ""
-            done = f"Añadido {qty}{_and(names)}."
+            done_parts.append(f"Añadido {qty}{_and(names)}.")
+        if present:
+            done_parts.append(f"{_cap(_and(present))} ya "
+                              f"{'estaba' if len(present) == 1 else 'estaban'} en la lista.")
+        done = " ".join(done_parts) or "No he podido hacerlo."
         return self._next(key, session, done)
 
     async def _more(self, key: str, session: Session, d: Doubt, coordinator: Any) -> str:

@@ -70,6 +70,9 @@ class DespensaClient:
         return await self._request("POST", f"/v1/requests/{request_id}/choose",
                                    json={"product_id": product_id})
 
+    async def cancel(self, request_id: str) -> dict[str, Any]:
+        return await self._request("POST", f"/v1/requests/{request_id}/cancel")
+
     async def more(self, request_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/v1/requests/{request_id}/more")
 

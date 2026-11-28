@@ -551,6 +551,13 @@ class AssistHandler:
             parts.append(f"No encuentro {_and(missing)} en Mercadona.")
         if failed:
             parts.append(_failed_text(failed, "añadir", len(failed) == len(items)))
+        # Closed by the cart read just above (a candidate entered the cart meanwhile):
+        # not asked.
+        settled = [d for d in doubts if d.request_id in self.closed]
+        if settled:
+            parts.append(f"{_cap(_and([d.query for d in settled]))} ya "
+                         f"{'está' if len(settled) == 1 else 'están'} en la lista.")
+        doubts = [d for d in doubts if d.request_id not in self.closed]
         if doubts:
             parts.append(self._open(user_input, doubts))
         return " ".join(parts) or "No he añadido nada."
@@ -664,6 +671,7 @@ class AssistHandler:
 
         names: list[str] = []
         present: list[str] = []
+        answered = False
         for i, c in enumerate(chosen):
             try:
                 if i == 0:
@@ -676,7 +684,10 @@ class AssistHandler:
             except DespensaError as exc:
                 _LOGGER.warning("Despensa no responde: %s", exc)
                 return "El servicio de la lista de la compra no responde ahora mismo."
-            if r.get("result") == "already_present":
+            if r.get("result") == "already_chosen":
+                # Answered meanwhile (Telegram, or closed by the cart): nothing written.
+                answered = True
+            elif r.get("result") == "already_present":
                 present.append(c.get("name", c["id"]))
             elif r.get("result") not in ("error", "not_present"):
                 names.append(c.get("name", c["id"]))
@@ -691,6 +702,8 @@ class AssistHandler:
         if present:
             done_parts.append(f"{_cap(_and(present))} ya "
                               f"{'estaba' if len(present) == 1 else 'estaban'} en la lista.")
+        if answered:
+            done_parts.append(f"La pregunta de {d.query} ya estaba contestada.")
         done = " ".join(done_parts) or "No he podido hacerlo."
         return self._next(key, session, done)
 
